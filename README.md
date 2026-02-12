@@ -113,30 +113,35 @@ Only relevant memories are injected.No full transcript replay is used.
 📂 Project Structure
 --------------------
 
-User Message
-↓
+memory\_agent/
 
-Retrieval Policy Decision
+│
 
-↓
+├── app.py
 
-Vector Retrieval (Top-K)
+├── database.py
 
-↓
+├── session.py
 
-Prompt Construction
+├── retrieval\_policy.py
 
-↓
+│
 
-LLM Response Generation
+├── memory/
 
-↓
+│ ├── retriever.py
 
-Memory Extraction
+│ └── extractor.py
 
-↓
+│
 
-Database Storage
+├── llm/
+
+│ └── generator.py
+
+│
+
+└── README.md
 
 ⚡ Latency Strategy (<500ms Target)
 ----------------------------------
@@ -262,5 +267,6 @@ This solution directly addresses:
 *   Strict latency constraints
     
 *   Transparent evaluation mechanism
+
 
 
