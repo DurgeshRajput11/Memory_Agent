@@ -1,18 +1,44 @@
-from database import conn, embed
+"""
+Active long-term memory retriever — vector similarity search with threshold.
+"""
 
-def retrieve_active(user_id, query, top_k=3):
-    cur = conn.cursor()
-    query_embedding = embed(query)
+import logging
+from database import get_conn, put_conn, embed
+from config import TOP_K, SIMILARITY_THRESHOLD
 
-    cur.execute("""
-        SELECT type, key, value
-        FROM profile_memory
-        WHERE user_id=%s
-        AND valid_to IS NULL
-        ORDER BY embedding <-> %s
-        LIMIT %s
-    """, (user_id, query_embedding, top_k))
+logger = logging.getLogger(__name__)
 
-    results = cur.fetchall()
-    cur.close()
-    return results
+
+def retrieve_active(user_id: str, query: str, top_k: int = TOP_K) -> list[tuple]:
+    """
+    Return top-K active memories whose cosine distance is below the threshold.
+    Each row: (type, key, value, distance)
+    """
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        query_embedding = embed(query)
+
+        cur.execute(
+            """
+            SELECT type, key, value,
+                   embedding <=> %s::vector AS distance
+            FROM profile_memory
+            WHERE user_id = %s
+              AND valid_to IS NULL
+              AND embedding <=> %s::vector < %s
+            ORDER BY distance
+            LIMIT %s
+            """,
+            (query_embedding, user_id, query_embedding, SIMILARITY_THRESHOLD, top_k),
+        )
+
+        results = cur.fetchall()
+        cur.close()
+        return results
+
+    except Exception as e:
+        logger.error("Memory retrieval failed: %s", e)
+        return []
+    finally:
+        put_conn(conn)
