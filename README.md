@@ -65,6 +65,7 @@ The system uses a **three-tier memory architecture**:
 
 🔄 Memory Flow
 --------------
+
 User Message      ↓  Retrieval Policy Decision      ↓  Vector Retrieval (Top-K)      ↓  Prompt Construction      ↓  LLM Response Generation      ↓  Memory Extraction      ↓  Database Storage   `
 
 Only relevant memories are injected.No full transcript replay is used.
@@ -237,3 +238,4 @@ This solution directly addresses:
 *   Strict latency constraints
     
 *   Transparent evaluation mechanism
+
