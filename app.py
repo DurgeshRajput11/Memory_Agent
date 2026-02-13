@@ -13,8 +13,9 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from session import SessionMemory
-from memory.retriever import retrieve_active
+from memory.retrieval_harness import retrieve_all, format_for_injection
 from memory.extractor import extract_and_store
+from memory.summarizer import should_summarize, compress_session_to_episodic
 from llm.generator import call_llm
 from retrieval_policy import decide_mode
 
@@ -38,6 +39,7 @@ app = FastAPI(title="Memory Agent", lifespan=lifespan)
 
 # In-memory session store (per user)
 sessions: dict[str, SessionMemory] = {}
+turn_counters: dict[str, int] = {}  # Track global turn number per user
 
 
 # ── Request / Response schemas ────────────────────────────────
@@ -57,36 +59,62 @@ def chat(req: ChatRequest):
     user_id = req.user_id
     message = req.message
 
-    # 1. Session (short-term) memory
+    # Initialize session and turn counter
     if user_id not in sessions:
         sessions[user_id] = SessionMemory()
+        turn_counters[user_id] = 0
+    
     session = sessions[user_id]
+    turn_counters[user_id] += 1
+    current_turn = turn_counters[user_id]
+    
     session.add("user", message)
+
+    # Check if we should compress old session turns into episodic memory
+    if should_summarize(len(session.history)):
+        # Take oldest turns and compress
+        to_compress = session.history[:-10]  # Keep last 10 in session
+        if to_compress:
+            _executor.submit(
+                compress_session_to_episodic,
+                user_id,
+                to_compress,
+                current_turn - len(session.history)
+            )
+            # Clear compressed turns from session
+            session.history = session.history[-10:]
 
     # 2. Retrieval policy decision
     mode = decide_mode(message)
 
-    # 3. Retrieve active long-term memories (if needed)
-    active_mem: list[tuple] = []
+    # 3. Multi-stage retrieval (semantic + episodic)
+    memory_injection = ""
     if mode == "active":
         try:
-            active_mem = retrieve_active(user_id, message)
+            retrieval_results = retrieve_all(user_id, message, top_k_facts=3, top_k_episodes=2)
+            memory_injection = format_for_injection(retrieval_results, max_tokens=200)
+            logger.info("Retrieved: %d facts + %d episodes",
+                       len(retrieval_results["structured_facts"]),
+                       len(retrieval_results["episodic_context"]))
         except Exception as e:
             logger.warning("Memory retrieval failed, continuing without: %s", e)
+            memory_injection = "No relevant memory found."
 
     # 4. Build prompt
-    memory_context = "\n".join(
-        f"[{m[0]}] {m[1]} = {m[2]}" for m in active_mem
-    ) if active_mem else "No relevant memories."
-
     short_context = "\n".join(
         f"{m['role']}: {m['content']}" for m in session.get()
     )
 
+    # Build context from retrieved facts
+    if memory_injection and memory_injection != "No relevant memory found.":
+        context_section = f"User facts:\n{memory_injection}\n\n"
+    else:
+        context_section = ""
+
     prompt = (
-        f"[ACTIVE MEMORY]\n{memory_context}\n\n"
-        f"[RECENT CONVERSATION]\n{short_context}\n\n"
-        "Answer consistently using the memory and conversation above."
+        f"{context_section}"
+        f"Conversation:\n{short_context}\n\n"
+        "Reply naturally in 1-2 sentences. Use facts when relevant."
     )
 
     # 5. LLM call (the only latency-critical part)

@@ -10,7 +10,6 @@ from config import DB_CONFIG, EMBEDDING_MODEL
 
 logger = logging.getLogger(__name__)
 
-# ── Connection pool (lazy initialisation) ─────────────────────
 _pool: pool.SimpleConnectionPool | None = None
 
 
